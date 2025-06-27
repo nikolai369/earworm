@@ -19,6 +19,19 @@ Build a basic system that can analyze audio files, extract their frequency featu
 - 🧰 Rust libraries like:
   - [`hound`](https://crates.io/crates/hound) – reading `.wav` files
   - [`rustfft`](https://crates.io/crates/rustfft) – FFT processing
-  - [`cpal` or `rodio`](https://crates.io/crates/rodio) – optional audio playback
 
 ---
+
+## 📝 TODO
+
+- [ ] ✅ Read and decode WAV file
+  - Resources:
+    - [Wave File Format](http://soundfile.sapp.org/doc/WaveFormat/)
+    - [WAV File Explained (YouTube)](https://www.youtube.com/watch?v=udbA7u1zYfc)
+- [ ] Extract audio samples
+- [ ] Apply FFT to windowed frames
+- [ ] Identify and visualize frequency peaks
+- [ ] Implement basic audio fingerprinting logic
+- [ ] Experiment with fingerprint matching
+- [ ] Add CLI interface for fingerprinting and lookup
+- [ ] Write tests for core logic
