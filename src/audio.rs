@@ -231,3 +231,87 @@ pub fn read_until_data(reader: &mut BufReader<File>) -> Result<(WavFmt, u32)> {
         };
     }
 }
+
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn test_read_2_bytes() {
+        let data = vec![0x12, 0x34];
+        let mut cursor = Cursor::new(data);
+        let result = cursor.read_2_bytes().unwrap();
+        assert_eq!(result, [0x12, 0x34]);
+    }
+
+    #[test]
+    fn test_read_3_bytes() {
+        let data = vec![0x01, 0x02, 0x03];
+        let mut cursor = Cursor::new(data);
+        let result = cursor.read_3_bytes().unwrap();
+        assert_eq!(result, [0x01, 0x02, 0x03]);
+    }
+
+    #[test]
+    fn test_read_4_bytes() {
+        let data = vec![0x0A, 0x0B, 0x0C, 0x0D];
+        let mut cursor = Cursor::new(data);
+        let result = cursor.read_4_bytes().unwrap();
+        assert_eq!(result, [0x0A, 0x0B, 0x0C, 0x0D]);
+    }
+
+    #[test]
+    fn test_read_le_u16() {
+        let data = vec![0x34, 0x12]; // Little endian for 0x1234 = 4660
+        let mut cursor = Cursor::new(data);
+        let result = cursor.read_le_u16().unwrap();
+        assert_eq!(result, 0x1234);
+    }
+
+    #[test]
+    fn test_read_le_i16() {
+        let data = vec![0xFF, 0x7F]; // Little endian for i16 max: 32767
+        let mut cursor = Cursor::new(data);
+        let result = cursor.read_le_i16().unwrap();
+        assert_eq!(result, 32767);
+
+        let data_neg = vec![0x00, 0x80]; // Little endian for i16 min: -32768
+        let mut cursor = Cursor::new(data_neg);
+        let result = cursor.read_le_i16().unwrap();
+        assert_eq!(result, -32768);
+    }
+
+    #[test]
+    fn test_read_le_i24() {
+        let data = vec![0x00, 0x00, 0x80]; // negative number (sign bit set)
+        let mut cursor = Cursor::new(data);
+        let result = cursor.read_le_i24().unwrap();
+        assert_eq!(result, -8388608); // min 24-bit signed int
+
+        let data_pos = vec![0xFF, 0xFF, 0x7F]; // positive max 24-bit int
+        let mut cursor = Cursor::new(data_pos);
+        let result = cursor.read_le_i24().unwrap();
+        assert_eq!(result, 8_388_607);
+    }
+
+    #[test]
+    fn test_read_le_u32() {
+        let data = vec![0x78, 0x56, 0x34, 0x12]; // 0x12345678 little endian
+        let mut cursor = Cursor::new(data);
+        let result = cursor.read_le_u32().unwrap();
+        assert_eq!(result, 0x12345678);
+    }
+
+    #[test]
+    fn test_read_le_i32() {
+        let data = vec![0xFF, 0xFF, 0xFF, 0x7F]; // max i32 (2147483647)
+        let mut cursor = Cursor::new(data);
+        let result = cursor.read_le_i32().unwrap();
+        assert_eq!(result, 2147483647);
+
+        let data_neg = vec![0x00, 0x00, 0x00, 0x80]; // min i32 (-2147483648)
+        let mut cursor = Cursor::new(data_neg);
+        let result = cursor.read_le_i32().unwrap();
+        assert_eq!(result, -2147483648);
+    }
+}
