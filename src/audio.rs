@@ -1,7 +1,9 @@
 use std::{
     fs::File,
-    io::{BufReader, Error, ErrorKind, Read, Result},
+    io::{BufReader, Read},
 };
+
+use crate::error::{Result, WavError};
 
 pub enum ChunkKind {
     Fmt,
@@ -107,10 +109,7 @@ pub fn read_riff_header(reader: &mut BufReader<File>) -> Result<u64> {
     // Read the chunk id RIFF header
     let riff_id = reader.read_4_bytes()?;
     if &riff_id != b"RIFF" {
-        return Err(Error::new(
-            ErrorKind::InvalidData,
-            "RIFF header not present",
-        ));
+        return Err(WavError::InvalidFormat("RIFF header not present"));
     }
 
     // Read the chuks size
@@ -119,10 +118,7 @@ pub fn read_riff_header(reader: &mut BufReader<File>) -> Result<u64> {
     // Read the WAVE format
     let format = reader.read_4_bytes()?;
     if &format != b"WAVE" {
-        return Err(Error::new(
-            ErrorKind::InvalidData,
-            "WAVE format not present",
-        ));
+        return Err(WavError::InvalidFormat("WAVE format not present"));
     }
 
     // File size is chuks_size + the 8 bytes we already read
@@ -130,6 +126,7 @@ pub fn read_riff_header(reader: &mut BufReader<File>) -> Result<u64> {
     Ok(chunks_size as u64 + 8)
 }
 
+// Reads "data" and "fmt " chunk headers
 fn read_chunk_header(reader: &mut BufReader<File>) -> Result<ChunkHeader> {
     let kind = reader.read_4_bytes()?;
     let size = reader.read_le_u32()?;
@@ -142,29 +139,28 @@ fn read_chunk_header(reader: &mut BufReader<File>) -> Result<ChunkHeader> {
             kind: ChunkKind::Data,
             size,
         }),
-        _ => Err(Error::new(
-            ErrorKind::InvalidData,
+        _ => Err(WavError::InvalidFormat(
             "Chunk header should be 'fmt ' or 'data'",
         )),
     }
 }
 
+// Reads the WAVE file fmt spec
 fn read_fmt_subchunk(reader: &mut BufReader<File>, chunk_size: u32) -> Result<WavFmt> {
     if chunk_size < 16 {
-        return Err(Error::new(ErrorKind::InvalidData, "Invalid chunk size"));
+        return Err(WavError::Corrupted("Invalid chunk size"));
     }
 
     let pcm = reader.read_le_u16()?;
     if pcm != 1 {
-        return Err(Error::new(
-            ErrorKind::InvalidData,
+        return Err(WavError::UnsupportedFormat(
             "Unsupported compression format",
         ));
     }
 
     let channels = reader.read_le_u16()?;
     if channels == 0 {
-        return Err(Error::new(ErrorKind::InvalidData, "Channels cannot be 0"));
+        return Err(WavError::Corrupted("Channels cannot be 0"));
     }
 
     let sample_rate = reader.read_le_u32()?;
@@ -174,18 +170,12 @@ fn read_fmt_subchunk(reader: &mut BufReader<File>, chunk_size: u32) -> Result<Wa
 
     let expected_byte_rate = sample_rate * channels as u32 * bits_per_sample as u32 / 8;
     if expected_byte_rate != byte_rate {
-        return Err(Error::new(
-            ErrorKind::InvalidData,
-            format!("Invalid byte rate, expected {expected_byte_rate}, read {byte_rate}"),
-        ));
+        return Err(WavError::Corrupted("Invalid byte rate"));
     }
 
     let expected_block_align = channels * bits_per_sample / 8;
     if expected_block_align != block_align {
-        return Err(Error::new(
-            ErrorKind::InvalidData,
-            format!("Invalid block align, expected {expected_block_align}, read {block_align}"),
-        ));
+        return Err(WavError::Corrupted("Invalid block align"));
     }
 
     Ok(WavFmt {
@@ -197,10 +187,7 @@ fn read_fmt_subchunk(reader: &mut BufReader<File>, chunk_size: u32) -> Result<Wa
     })
 }
 
-// pub fn read_audio_samples(reader: &mut BufReader<File>, samples: u32) {
-//   let samples = wav_fmt
-// }
-
+// Reads all chunks up until the actual audi data samples
 pub fn read_until_data(reader: &mut BufReader<File>) -> Result<(WavFmt, u32)> {
     let size = read_riff_header(reader)?;
 
@@ -216,16 +203,9 @@ pub fn read_until_data(reader: &mut BufReader<File>) -> Result<(WavFmt, u32)> {
             ChunkKind::Data => {
                 let data_size = chunk_header.size;
                 if let Some(wav) = wav_fmt {
-                    println!(
-                        "WAVE file chunks read, fmt: {:?}, data size: {data_size}",
-                        wav
-                    );
                     return Ok((wav, data_size));
                 } else {
-                    return Err(Error::new(
-                        ErrorKind::InvalidData,
-                        "Invalid block align, expected {expected_block_align}, read {block_align}",
-                    ));
+                    return Err(WavError::InvalidFormat("WAVE \"fmt \" chunk not found"));
                 }
             } // Read until data, read it on demand later
         };
