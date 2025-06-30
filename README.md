@@ -24,12 +24,15 @@ Build a basic system that can analyze audio files, extract their frequency featu
 
 ## 📝 TODO
 
-- [ ] ✅ Read and decode WAV file
+- [x] Read and decode WAV file
   - Resources:
     - [Wave File Format](http://soundfile.sapp.org/doc/WaveFormat/)
     - [WAV File Explained (YouTube)](https://www.youtube.com/watch?v=udbA7u1zYfc)
-- [ ] Extract audio samples
+- [x] Extract audio samples
 - [ ] Apply FFT to windowed frames
+  - Resources:
+    - [But what is the Fourier Transform? (YouTube)](https://www.youtube.com/watch?v=spUNpyF58BY)
+    - [FFT Implementation (YouTube)](https://www.youtube.com/watch?v=Y_ORYKoCExM&list=PLWQ7lipTunZkSGoAnIgbbP54Z7ZawTYSV)
 - [ ] Identify and visualize frequency peaks
 - [ ] Implement basic audio fingerprinting logic
 - [ ] Experiment with fingerprint matching
