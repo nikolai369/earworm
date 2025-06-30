@@ -5,12 +5,12 @@ use std::{
 
 use crate::error::{Result, WavError};
 
-pub enum ChunkKind {
+enum ChunkKind {
     Fmt,
     Data,
 }
 
-pub struct ChunkHeader {
+struct ChunkHeader {
     kind: ChunkKind,
     size: u32,
 }
@@ -24,7 +24,22 @@ pub struct WavFmt {
     pub bits_per_sample: u16,
 }
 
-impl WavFmt {}
+pub struct WavConfig {
+    wav_fmt: WavFmt,
+    size: u32,
+    samples: u32,
+    bytes_per_sample: u32,
+}
+
+impl WavConfig {
+    pub fn duration(&self) -> u32 {
+        self.samples / (self.wav_fmt.channels as u32) / self.wav_fmt.sample_rate
+    }
+
+    pub fn fmt(&self) -> &WavFmt {
+        &self.wav_fmt
+    }
+}
 
 // Helpers for reading WAVE file
 pub trait ReaderExt {
@@ -104,8 +119,69 @@ where
     }
 }
 
+pub struct WavReader {
+    reader: BufReader<File>,
+    config: WavConfig,
+}
+
+impl WavReader {
+    pub fn new(reader: BufReader<File>) -> Result<Self> {
+        let mut reader = reader;
+        let (wav_fmt, size) = read_until_data(&mut reader)?;
+
+        let bytes_per_sample = (wav_fmt.bits_per_sample / 8) as u32;
+        let samples = size / bytes_per_sample;
+
+        if samples % wav_fmt.channels as u32 != 0 {
+            return Err(WavError::Corrupted(
+                "Number of samples per channel must be equal",
+            ));
+        }
+        let config = WavConfig {
+            wav_fmt,
+            size,
+            bytes_per_sample,
+            samples,
+        };
+        let wav_reader = WavReader { reader, config };
+        Ok(wav_reader)
+    }
+
+    pub fn samples(&mut self) -> Result<Vec<i32>> {
+        let data_size: usize = match self.config.samples.try_into() {
+            Ok(val) => val,
+            Err(_) => {
+                return Err(WavError::UnsupportedFormat("Too many samples to process"));
+            }
+        };
+        let mut data = vec![0; data_size];
+        for _ in 0..self.config.samples {
+            let sample = match self.config.wav_fmt.bits_per_sample {
+                16 => self.reader.read_le_i16()? as i32, //cast all to i32 for now
+                24 => self.reader.read_le_i24()? as i32,
+                32 => self.reader.read_le_i32()? as i32,
+                _ => {
+                    return Err(WavError::UnsupportedFormat("Sample size not supported"));
+                }
+            };
+
+            data.push(sample);
+        }
+
+        Ok(data)
+    }
+
+    pub fn config(&self) -> &WavConfig {
+        &self.config
+    }
+
+    pub fn size(&self) -> u32 {
+        self.config.size
+    }
+}
+
 // Returns the file size
-pub fn read_riff_header(reader: &mut BufReader<File>) -> Result<u64> {
+fn read_riff_header(reader: &mut BufReader<File>) -> Result<u64> {
     // Read the chunk id RIFF header
     let riff_id = reader.read_4_bytes()?;
     if &riff_id != b"RIFF" {
@@ -188,7 +264,7 @@ fn read_fmt_subchunk(reader: &mut BufReader<File>, chunk_size: u32) -> Result<Wa
 }
 
 // Reads all chunks up until the actual audi data samples
-pub fn read_until_data(reader: &mut BufReader<File>) -> Result<(WavFmt, u32)> {
+fn read_until_data(reader: &mut BufReader<File>) -> Result<(WavFmt, u32)> {
     let size = read_riff_header(reader)?;
 
     println!("WAVE file opened, size: {}", size);
@@ -205,7 +281,7 @@ pub fn read_until_data(reader: &mut BufReader<File>) -> Result<(WavFmt, u32)> {
                 if let Some(wav) = wav_fmt {
                     return Ok((wav, data_size));
                 } else {
-                    return Err(WavError::InvalidFormat("WAVE \"fmt \" chunk not found"));
+                    return Err(WavError::InvalidFormat("WAVE \"fmt \" not present"));
                 }
             } // Read until data, read it on demand later
         };
@@ -213,13 +289,12 @@ pub fn read_until_data(reader: &mut BufReader<File>) -> Result<(WavFmt, u32)> {
 }
 
 mod tests {
-    use super::*;
-    use std::io::Cursor;
+    use super::ReaderExt;
 
     #[test]
     fn test_read_2_bytes() {
         let data = vec![0x12, 0x34];
-        let mut cursor = Cursor::new(data);
+        let mut cursor = std::io::Cursor::new(data);
         let result = cursor.read_2_bytes().unwrap();
         assert_eq!(result, [0x12, 0x34]);
     }
@@ -227,7 +302,7 @@ mod tests {
     #[test]
     fn test_read_3_bytes() {
         let data = vec![0x01, 0x02, 0x03];
-        let mut cursor = Cursor::new(data);
+        let mut cursor = std::io::Cursor::new(data);
         let result = cursor.read_3_bytes().unwrap();
         assert_eq!(result, [0x01, 0x02, 0x03]);
     }
@@ -235,7 +310,7 @@ mod tests {
     #[test]
     fn test_read_4_bytes() {
         let data = vec![0x0A, 0x0B, 0x0C, 0x0D];
-        let mut cursor = Cursor::new(data);
+        let mut cursor = std::io::Cursor::new(data);
         let result = cursor.read_4_bytes().unwrap();
         assert_eq!(result, [0x0A, 0x0B, 0x0C, 0x0D]);
     }
@@ -243,7 +318,7 @@ mod tests {
     #[test]
     fn test_read_le_u16() {
         let data = vec![0x34, 0x12]; // Little endian for 0x1234 = 4660
-        let mut cursor = Cursor::new(data);
+        let mut cursor = std::io::Cursor::new(data);
         let result = cursor.read_le_u16().unwrap();
         assert_eq!(result, 0x1234);
     }
@@ -251,12 +326,12 @@ mod tests {
     #[test]
     fn test_read_le_i16() {
         let data = vec![0xFF, 0x7F]; // Little endian for i16 max: 32767
-        let mut cursor = Cursor::new(data);
+        let mut cursor = std::io::Cursor::new(data);
         let result = cursor.read_le_i16().unwrap();
         assert_eq!(result, 32767);
 
         let data_neg = vec![0x00, 0x80]; // Little endian for i16 min: -32768
-        let mut cursor = Cursor::new(data_neg);
+        let mut cursor = std::io::Cursor::new(data_neg);
         let result = cursor.read_le_i16().unwrap();
         assert_eq!(result, -32768);
     }
@@ -264,12 +339,12 @@ mod tests {
     #[test]
     fn test_read_le_i24() {
         let data = vec![0x00, 0x00, 0x80]; // negative number (sign bit set)
-        let mut cursor = Cursor::new(data);
+        let mut cursor = std::io::Cursor::new(data);
         let result = cursor.read_le_i24().unwrap();
         assert_eq!(result, -8388608); // min 24-bit signed int
 
         let data_pos = vec![0xFF, 0xFF, 0x7F]; // positive max 24-bit int
-        let mut cursor = Cursor::new(data_pos);
+        let mut cursor = std::io::Cursor::new(data_pos);
         let result = cursor.read_le_i24().unwrap();
         assert_eq!(result, 8_388_607);
     }
@@ -277,7 +352,7 @@ mod tests {
     #[test]
     fn test_read_le_u32() {
         let data = vec![0x78, 0x56, 0x34, 0x12]; // 0x12345678 little endian
-        let mut cursor = Cursor::new(data);
+        let mut cursor = std::io::Cursor::new(data);
         let result = cursor.read_le_u32().unwrap();
         assert_eq!(result, 0x12345678);
     }
@@ -285,12 +360,12 @@ mod tests {
     #[test]
     fn test_read_le_i32() {
         let data = vec![0xFF, 0xFF, 0xFF, 0x7F]; // max i32 (2147483647)
-        let mut cursor = Cursor::new(data);
+        let mut cursor = std::io::Cursor::new(data);
         let result = cursor.read_le_i32().unwrap();
         assert_eq!(result, 2147483647);
 
         let data_neg = vec![0x00, 0x00, 0x00, 0x80]; // min i32 (-2147483648)
-        let mut cursor = Cursor::new(data_neg);
+        let mut cursor = std::io::Cursor::new(data_neg);
         let result = cursor.read_le_i32().unwrap();
         assert_eq!(result, -2147483648);
     }
