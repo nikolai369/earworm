@@ -8,7 +8,7 @@ pub enum WavError {
     Corrupted(&'static str),
 }
 
-// This allows ? on I/O functions to work
+// This allows ? on I/O functions to work because when we use the ? operator it will use the from trait behind the scenes
 impl From<io::Error> for WavError {
     fn from(err: io::Error) -> Self {
         WavError::Io(err)

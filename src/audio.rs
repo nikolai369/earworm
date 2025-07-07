@@ -154,10 +154,11 @@ impl WavReader {
                 return Err(WavError::UnsupportedFormat("Too many samples to process"));
             }
         };
+
         let mut data = vec![0; data_size];
         for _ in 0..self.config.samples {
             let sample = match self.config.wav_fmt.bits_per_sample {
-                16 => self.reader.read_le_i16()? as i32, //cast all to i32 for now
+                16 => self.reader.read_le_i16()? as i32, // TODO: cast all to i32 for now
                 24 => self.reader.read_le_i24()? as i32,
                 32 => self.reader.read_le_i32()? as i32,
                 _ => {
