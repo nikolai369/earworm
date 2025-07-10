@@ -147,7 +147,7 @@ impl WavReader {
         Ok(wav_reader)
     }
 
-    pub fn samples(&mut self) -> Result<Vec<i32>> {
+    pub fn mono(&mut self) -> Result<Vec<i32>> {
         let data_size: usize = match self.config.samples.try_into() {
             Ok(val) => val,
             Err(_) => {
@@ -155,18 +155,25 @@ impl WavReader {
             }
         };
 
-        let mut data = vec![0; data_size];
-        for _ in 0..self.config.samples {
-            let sample = match self.config.wav_fmt.bits_per_sample {
-                16 => self.reader.read_le_i16()? as i32, // TODO: cast all to i32 for now
-                24 => self.reader.read_le_i24()? as i32,
-                32 => self.reader.read_le_i32()? as i32,
-                _ => {
-                    return Err(WavError::UnsupportedFormat("Sample size not supported"));
-                }
-            };
+        let channels = self.config.wav_fmt.channels;
+        let mut data = Vec::with_capacity(data_size / channels as usize);
+        for _ in 0..data.capacity() {
+            let mut channel_sum = 0; //TODO: maybe use i64 to avoid data loss if sum overflows
+            for _ in 0..channels {
+                let sample = match self.config.wav_fmt.bits_per_sample {
+                    16 => self.reader.read_le_i16()? as i32, // TODO: cast all to i32 for now
+                    24 => self.reader.read_le_i24()? as i32,
+                    32 => self.reader.read_le_i32()? as i32,
+                    _ => {
+                        return Err(WavError::UnsupportedFormat("Sample size not supported"));
+                    }
+                };
 
-            data.push(sample);
+                channel_sum += sample;
+            }
+
+            // Average the amplitude to avoid clipping
+            data.push(channel_sum / channels as i32);
         }
 
         Ok(data)

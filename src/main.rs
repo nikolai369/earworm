@@ -36,6 +36,22 @@ fn dft(samples: &[i32]) -> Vec<Complex> {
     result
 } // TODO: use only i32 values for now
 
+fn fft(samples: &[i32]) -> Vec<Complex64> {
+    let mut planner: rustfft::FftPlanner<f64> = rustfft::FftPlanner::new();
+    let fft = planner.plan_fft_forward(WINDOW_SIZE);
+    let mut buff: Vec<Complex64> = samples
+        .iter()
+        .copied()
+        .map(|x| Complex64 {
+            re: x as f64,
+            im: 0.0,
+        })
+        .collect();
+    fft.process(&mut buff);
+
+    buff
+}
+
 fn plot_dft_magnitude(
     output_path: &str,
     dft_result: Vec<f64>,
@@ -84,36 +100,34 @@ fn main() -> Result<()> {
     let mut wav_reader = WavReader::new(reader)?;
 
     // Read vector of i32 samples
-    let data = wav_reader.samples()?;
+    let data = wav_reader.mono()?;
 
     // Testing and comparing my naive dft vs rustfft
     let mut windows = data.windows(WINDOW_SIZE);
-    let target_window = windows.nth_back(3000).unwrap();
-    let result = dft(target_window);
-    let mut planner: rustfft::FftPlanner<f64> = rustfft::FftPlanner::new();
-    let fft = planner.plan_fft_forward(WINDOW_SIZE);
-    let mut buff = Vec::with_capacity(target_window.len());
-    for sample in target_window {
-        buff.push(Complex64 {
-            re: *sample as f64,
-            im: 0.0,
-        })
-    }
+    let target_window = windows.nth(69696).unwrap();
 
-    fft.process(&mut buff);
+    // Naive DFT
+    let dft_result = dft(target_window);
+
+    // FFT
+    let fft_result = fft(target_window);
 
     match (
         plot_dft_magnitude(
             "./dft_plot.png",
-            result
+            dft_result
                 .iter()
-                .take(result.len() / 2)
+                .take(dft_result.len() / 2)
                 .map(|x| x.abs())
                 .collect(),
         ),
         plot_dft_magnitude(
             "./fft_plot.png",
-            buff.iter().take(buff.len() / 2).map(|x| x.abs()).collect(),
+            fft_result
+                .iter()
+                .take(fft_result.len() / 2)
+                .map(|x| x.abs())
+                .collect(),
         ),
     ) {
         _ => return Ok(()),
