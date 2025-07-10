@@ -127,7 +127,7 @@ pub struct WavReader {
 impl WavReader {
     pub fn new(reader: BufReader<File>) -> Result<Self> {
         let mut reader = reader;
-        let (wav_fmt, size) = read_until_data(&mut reader)?;
+        let (wav_fmt, size) = WavReader::read_until_data(&mut reader)?;
 
         let bytes_per_sample = (wav_fmt.bits_per_sample / 8) as u32;
         let samples = size / bytes_per_sample;
@@ -145,6 +145,114 @@ impl WavReader {
         };
         let wav_reader = WavReader { reader, config };
         Ok(wav_reader)
+    }
+
+    // Returns the file size
+    fn read_riff_header(reader: &mut BufReader<File>) -> Result<u64> {
+        // Read the chunk id RIFF header
+        let riff_id = reader.read_4_bytes()?;
+        if &riff_id != b"RIFF" {
+            return Err(WavError::InvalidFormat("RIFF header not present"));
+        }
+
+        // Read the chuks size
+        let chunks_size = reader.read_le_u32()?;
+
+        // Read the WAVE format
+        let format = reader.read_4_bytes()?;
+        if &format != b"WAVE" {
+            return Err(WavError::InvalidFormat("WAVE format not present"));
+        }
+
+        // File size is chuks_size + the 8 bytes we already read
+        // Might not fit so cast to u64
+        Ok(chunks_size as u64 + 8)
+    }
+
+    // Reads "data" and "fmt " chunk headers
+    fn read_chunk_header(reader: &mut BufReader<File>) -> Result<ChunkHeader> {
+        let kind = reader.read_4_bytes()?;
+        let size = reader.read_le_u32()?;
+        match &kind {
+            b"fmt " => Ok(ChunkHeader {
+                kind: ChunkKind::Fmt,
+                size,
+            }),
+            b"data" => Ok(ChunkHeader {
+                kind: ChunkKind::Data,
+                size,
+            }),
+            _ => Err(WavError::InvalidFormat(
+                "Chunk header should be 'fmt ' or 'data'",
+            )),
+        }
+    }
+
+    // Reads the WAVE file fmt spec
+    fn read_fmt_subchunk(reader: &mut BufReader<File>, chunk_size: u32) -> Result<WavFmt> {
+        if chunk_size < 16 {
+            return Err(WavError::Corrupted("Invalid chunk size"));
+        }
+
+        let pcm = reader.read_le_u16()?;
+        if pcm != 1 {
+            return Err(WavError::UnsupportedFormat(
+                "Unsupported compression format",
+            ));
+        }
+
+        let channels = reader.read_le_u16()?;
+        if channels == 0 {
+            return Err(WavError::Corrupted("Channels cannot be 0"));
+        }
+
+        let sample_rate = reader.read_le_u32()?;
+        let byte_rate = reader.read_le_u32()?;
+        let block_align = reader.read_le_u16()?;
+        let bits_per_sample = reader.read_le_u16()?;
+
+        let expected_byte_rate = sample_rate * channels as u32 * bits_per_sample as u32 / 8;
+        if expected_byte_rate != byte_rate {
+            return Err(WavError::Corrupted("Invalid byte rate"));
+        }
+
+        let expected_block_align = channels * bits_per_sample / 8;
+        if expected_block_align != block_align {
+            return Err(WavError::Corrupted("Invalid block align"));
+        }
+
+        Ok(WavFmt {
+            channels,
+            sample_rate,
+            byte_rate,
+            block_align,
+            bits_per_sample,
+        })
+    }
+
+    // Reads all chunks up until the actual audi data samples
+    fn read_until_data(reader: &mut BufReader<File>) -> Result<(WavFmt, u32)> {
+        let size = WavReader::read_riff_header(reader)?;
+
+        println!("WAVE file opened, size: {}", size);
+
+        let mut wav_fmt = None;
+        loop {
+            let chunk_header = WavReader::read_chunk_header(reader)?;
+            match chunk_header.kind {
+                ChunkKind::Fmt => {
+                    wav_fmt = Some(WavReader::read_fmt_subchunk(reader, chunk_header.size)?);
+                }
+                ChunkKind::Data => {
+                    let data_size = chunk_header.size;
+                    if let Some(wav) = wav_fmt {
+                        return Ok((wav, data_size));
+                    } else {
+                        return Err(WavError::InvalidFormat("WAVE \"fmt \" not present"));
+                    }
+                } // Read until data, read it on demand later
+            };
+        }
     }
 
     pub fn mono(&mut self) -> Result<Vec<i32>> {
@@ -185,114 +293,6 @@ impl WavReader {
 
     pub fn size(&self) -> u32 {
         self.config.size
-    }
-}
-
-// Returns the file size
-fn read_riff_header(reader: &mut BufReader<File>) -> Result<u64> {
-    // Read the chunk id RIFF header
-    let riff_id = reader.read_4_bytes()?;
-    if &riff_id != b"RIFF" {
-        return Err(WavError::InvalidFormat("RIFF header not present"));
-    }
-
-    // Read the chuks size
-    let chunks_size = reader.read_le_u32()?;
-
-    // Read the WAVE format
-    let format = reader.read_4_bytes()?;
-    if &format != b"WAVE" {
-        return Err(WavError::InvalidFormat("WAVE format not present"));
-    }
-
-    // File size is chuks_size + the 8 bytes we already read
-    // Might not fit so cast to u64
-    Ok(chunks_size as u64 + 8)
-}
-
-// Reads "data" and "fmt " chunk headers
-fn read_chunk_header(reader: &mut BufReader<File>) -> Result<ChunkHeader> {
-    let kind = reader.read_4_bytes()?;
-    let size = reader.read_le_u32()?;
-    match &kind {
-        b"fmt " => Ok(ChunkHeader {
-            kind: ChunkKind::Fmt,
-            size,
-        }),
-        b"data" => Ok(ChunkHeader {
-            kind: ChunkKind::Data,
-            size,
-        }),
-        _ => Err(WavError::InvalidFormat(
-            "Chunk header should be 'fmt ' or 'data'",
-        )),
-    }
-}
-
-// Reads the WAVE file fmt spec
-fn read_fmt_subchunk(reader: &mut BufReader<File>, chunk_size: u32) -> Result<WavFmt> {
-    if chunk_size < 16 {
-        return Err(WavError::Corrupted("Invalid chunk size"));
-    }
-
-    let pcm = reader.read_le_u16()?;
-    if pcm != 1 {
-        return Err(WavError::UnsupportedFormat(
-            "Unsupported compression format",
-        ));
-    }
-
-    let channels = reader.read_le_u16()?;
-    if channels == 0 {
-        return Err(WavError::Corrupted("Channels cannot be 0"));
-    }
-
-    let sample_rate = reader.read_le_u32()?;
-    let byte_rate = reader.read_le_u32()?;
-    let block_align = reader.read_le_u16()?;
-    let bits_per_sample = reader.read_le_u16()?;
-
-    let expected_byte_rate = sample_rate * channels as u32 * bits_per_sample as u32 / 8;
-    if expected_byte_rate != byte_rate {
-        return Err(WavError::Corrupted("Invalid byte rate"));
-    }
-
-    let expected_block_align = channels * bits_per_sample / 8;
-    if expected_block_align != block_align {
-        return Err(WavError::Corrupted("Invalid block align"));
-    }
-
-    Ok(WavFmt {
-        channels,
-        sample_rate,
-        byte_rate,
-        block_align,
-        bits_per_sample,
-    })
-}
-
-// Reads all chunks up until the actual audi data samples
-fn read_until_data(reader: &mut BufReader<File>) -> Result<(WavFmt, u32)> {
-    let size = read_riff_header(reader)?;
-
-    println!("WAVE file opened, size: {}", size);
-
-    let mut wav_fmt = None;
-    loop {
-        let chunk_header = read_chunk_header(reader)?;
-        match chunk_header.kind {
-            ChunkKind::Fmt => {
-                wav_fmt = Some(read_fmt_subchunk(reader, chunk_header.size)?);
-            }
-            ChunkKind::Data => {
-                let data_size = chunk_header.size;
-                if let Some(wav) = wav_fmt {
-                    return Ok((wav, data_size));
-                } else {
-                    return Err(WavError::InvalidFormat("WAVE \"fmt \" not present"));
-                }
-            } // Read until data, read it on demand later
-        };
     }
 }
 
