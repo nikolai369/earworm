@@ -296,6 +296,7 @@ impl WavReader {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use super::ReaderExt;
 
