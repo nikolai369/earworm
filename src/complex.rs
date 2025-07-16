@@ -10,6 +10,7 @@ impl Complex {
         Complex { re: real, im }
     }
 
+    // r is the magnitude of the Complex num and theta is the angle of the vector
     pub fn from_polar(r: f64, theta: f64) -> Self {
         Complex {
             re: r * theta.cos(),

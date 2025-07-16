@@ -1,6 +1,6 @@
 use plotters::prelude::*;
 use rustfft::num_complex::{Complex64, ComplexFloat};
-use std::f64::consts::PI;
+use std::f64::consts::{self, PI};
 use std::{fs::File, io::BufReader};
 
 use crate::audio::WavReader;
@@ -14,7 +14,7 @@ mod error;
 const PATH: &str = "/Users/nikolai369/Downloads/dj co.kr & h4rdy - ill e sam sa (vip).wav";
 const WINDOW_SIZE: usize = 1024;
 
-fn dft(samples: &[i32]) -> Vec<Complex> {
+fn dft(samples: &[f64]) -> Vec<Complex> {
     let n = samples.len();
     let theta = -2.0 * PI / n as f64;
     // r = 1 and theta = -2.0 * PI / n gives as the unit circle in the complex plain which is equal to e^-2PIi/N
@@ -34,22 +34,54 @@ fn dft(samples: &[i32]) -> Vec<Complex> {
     }
 
     result
-} // TODO: use only i32 values for now
+} // TODO: use only f64 values for now
 
-fn fft(samples: &[i32]) -> Vec<Complex64> {
+fn fft(samples: &[f64]) -> Vec<Complex64> {
     let mut planner: rustfft::FftPlanner<f64> = rustfft::FftPlanner::new();
     let fft = planner.plan_fft_forward(WINDOW_SIZE);
     let mut buff: Vec<Complex64> = samples
         .iter()
         .copied()
-        .map(|x| Complex64 {
-            re: x as f64,
-            im: 0.0,
-        })
+        .map(|x| Complex64 { re: x, im: 0.0 })
         .collect();
     fft.process(&mut buff);
 
     buff
+}
+
+// Naive linear slope window function
+fn window_function(window_size: usize) -> Vec<f64> {
+    let slope_size = (window_size * 5) / 100;
+
+    // Need to apply a gradient slope on begining and end of the window by multiplying the by te generated window function
+
+    let mut win_fn: Vec<f64> = Vec::with_capacity(window_size);
+    for i in 0..window_size {
+        if i < slope_size {
+            win_fn.push(i as f64 / slope_size as f64);
+            continue;
+        }
+
+        if window_size - i < slope_size {
+            let temp = window_size as f64 - i as f64;
+            win_fn.push(temp / slope_size as f64);
+            continue;
+        }
+
+        win_fn.push(1.0);
+    }
+
+    win_fn
+}
+
+fn apply_win_fn(window: &[f64], win_fn: &Vec<f64>) -> Vec<f64> {
+    let mut result: Vec<f64> = Vec::with_capacity(window.len());
+
+    for i in 0..window.len() {
+        result.push(window[i] as f64 * win_fn[i]);
+    }
+
+    result
 }
 
 fn plot_dft_magnitude(
@@ -102,17 +134,37 @@ fn main() -> Result<()> {
     // Read vector of i32 samples
     let data = wav_reader.mono()?;
 
+    // How to minimize spectral leakage??
     // Testing and comparing my naive dft vs rustfft
     let mut windows = data.windows(WINDOW_SIZE);
-    let target_window = windows.nth(69696).unwrap();
+    let target_window = windows.nth(40000).unwrap();
+
+    // Hann window creates a cosine curve starting and ending at zero and peeking at one in the middle
+    let hann_window = (0..WINDOW_SIZE)
+        .map(|i| 0.5 - 0.5 * ((consts::PI * i as f64 * 2.0) / WINDOW_SIZE as f64).cos())
+        .collect();
+
+    let naive_window = window_function(WINDOW_SIZE);
+    let windowed = apply_win_fn(target_window, &hann_window);
+    let naive_windowed = apply_win_fn(target_window, &naive_window);
 
     // Naive DFT
-    let dft_result = dft(target_window);
+    let dft_result = dft(&windowed);
+
+    let naive_window_result = dft(&naive_windowed);
 
     // FFT
-    let fft_result = fft(target_window);
+    let fft_result = fft(&windowed);
 
     match (
+        plot_dft_magnitude(
+            "./naive_window_fn_dft.png",
+            naive_window_result
+                .iter()
+                .take(naive_window_result.len() / 2)
+                .map(|x| x.abs())
+                .collect(),
+        ),
         plot_dft_magnitude(
             "./dft_plot.png",
             dft_result
