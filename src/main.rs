@@ -112,8 +112,8 @@ fn plot_dft_magnitude(
 }
 
 // Frequency resolution
-// For a 44100 sample rate file and 1024 samples per window, frequency_resolution = 44100 / 1024 ~ 21.5Hz
-// Which means each freq bin coresponds to a 21.5Hz range
+// For a 44100 sample rate file and 1024 samples per window, frequency_resolution = 44100 / 1024 ~ 43Hz
+// Which means each freq bin coresponds to a 43Hz range
 // For 1024 samples in a window there are 512 bins since n of samples give n/2 bins
 // Larger window size gives us a greater frequency resolution
 //
